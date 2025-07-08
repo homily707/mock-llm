@@ -1,13 +1,27 @@
 package manager
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/homily707/mock-llm/internal/types"
+)
 
 type ScheduleReq struct {
+	OutputIds        []int
+	FinishedReason   string
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+}
+
+func (r *ScheduleReq) finished() bool {
+	panic("not implemented")
 }
 
 type Scheduler struct {
 	requestDispatcher map[string]func(any)
 	recvRequests      chan any
+	tpWorker          TpWorker
 
 	lastBatch    *ScheduleBatch
 	runningBatch *ScheduleBatch
@@ -30,7 +44,7 @@ func (s *Scheduler) eventLoopNormal() {
 		batch := s.getNextBatchToRun()
 		if batch != nil {
 			result := s.runBatch(batch)
-			s.processBatchResult(result)
+			s.processBatchResult(batch, result)
 		}
 		s.lastBatch = batch
 	}
@@ -69,19 +83,41 @@ func (s *Scheduler) sortWaitingQueue() {
 }
 
 func (s *Scheduler) runBatch(batch *ScheduleBatch) *ScheduleBatchResult {
-
+	modelWorkBatch := batch.getModelWorkBatch()
+	logitsOutput, nextTokenIds := s.tpWorker.ForwardBatchGeneration(modelWorkBatch)
+	return &ScheduleBatchResult{
+		logitsOutput: logitsOutput,
+		nextTokenIds: nextTokenIds,
+	}
 }
 
-func (s *Scheduler) processBatchResult(result *ScheduleBatchResult) {
+func (s *Scheduler) processBatchResult(batch *ScheduleBatch, result *ScheduleBatchResult) {
+	if batch.forwardMode == "EXTEND" {
 
+	}
+	if batch.forwardMode == "DECODE" {
+		for i, req := range batch.reqs {
+			req.OutputIds = append(req.OutputIds, result.nextTokenIds.Index(i).ToInt())
+		}
+	}
+
+	s.streamOutput(batch.reqs)
+}
+
+func (s *Scheduler) streamOutput(reqs []*ScheduleReq) {
+	for _, req := range reqs {
+		if req.finished() {
+		}
+	}
 }
 
 func (s *Scheduler) updateRunningBatch() {
-
+	return
 }
 
 type ScheduleBatch struct {
-	batchIsFull bool
+	forwardMode string
+	reqs        []*ScheduleReq
 }
 
 func NewScheduleBatch() *ScheduleBatch {
@@ -89,15 +125,24 @@ func NewScheduleBatch() *ScheduleBatch {
 }
 
 func (s *ScheduleBatch) merge(other *ScheduleBatch) {
-	s.batchIsFull = s.batchIsFull || other.batchIsFull
+
+}
+
+func (s *ScheduleBatch) getModelWorkBatch() *ModelWorkBatch {
+	return &ModelWorkBatch{}
 }
 
 type ScheduleBatchResult struct {
+	logitsOutput types.LogitsProcessorOutput
+	nextTokenIds types.Tensor
 }
 
 type PrefillAdder struct {
 }
 
 func (p PrefillAdder) add(req *ScheduleReq) bool {
+	return true
+}
 
+type ModelWorkBatch struct {
 }

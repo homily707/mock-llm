@@ -79,7 +79,7 @@ func (s *Scheduler) getNewBatchPrefill() *ScheduleBatch {
 }
 
 func (s *Scheduler) sortWaitingQueue() {
-
+	// FIFO do nothing
 }
 
 func (s *Scheduler) runBatch(batch *ScheduleBatch) *ScheduleBatchResult {
@@ -93,7 +93,12 @@ func (s *Scheduler) runBatch(batch *ScheduleBatch) *ScheduleBatchResult {
 
 func (s *Scheduler) processBatchResult(batch *ScheduleBatch, result *ScheduleBatchResult) {
 	if batch.forwardMode == "EXTEND" {
+		// todo: chunked
 
+		// non chunked, just act like decode first token
+		for i, req := range batch.reqs {
+			req.OutputIds = append(req.OutputIds, result.nextTokenIds.Index(i).ToInt())
+		}
 	}
 	if batch.forwardMode == "DECODE" {
 		for i, req := range batch.reqs {

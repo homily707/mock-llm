@@ -1,17 +1,19 @@
 package manager
 
 import (
-	"reflect"
-
 	"github.com/homily707/mock-llm/internal/types"
 )
 
 type ScheduleReq struct {
-	OutputIds        []int
-	FinishedReason   string
-	PromptTokens     int
-	CompletionTokens int
-	CachedTokens     int
+	rid            string
+	originInputIds []int
+	samplingParams types.SamplingParams
+
+	outputIds        []int
+	finishedReason   string
+	promptTokens     int
+	completionTokens int
+	cachedTokens     int
 }
 
 func (r *ScheduleReq) finished() bool {
@@ -19,9 +21,8 @@ func (r *ScheduleReq) finished() bool {
 }
 
 type Scheduler struct {
-	requestDispatcher map[string]func(any)
-	recvRequests      chan any
-	tpWorker          TpWorker
+	recvRequests chan any
+	tpWorker     TpWorker
 
 	lastBatch    *ScheduleBatch
 	runningBatch *ScheduleBatch
@@ -32,14 +33,15 @@ func (s *Scheduler) eventLoopNormal() {
 	for {
 		select {
 		case req := <-s.recvRequests:
-			typ := reflect.TypeOf(req)
-			if typ.Kind() == reflect.Ptr {
-				typ = typ.Elem()
+			switch req := req.(type) {
+			case *TokenizedGenerateReqInput:
+				r := ScheduleReq{
+					rid:            req.rid,
+					originInputIds: req.inputIds,
+					promptTokens:   len(req.inputIds),
+				}
+				s.waitingQueue = append(s.waitingQueue, &r)
 			}
-			if _, ok := s.requestDispatcher[typ.String()]; !ok {
-				panic("no dispatcher for " + typ.String())
-			}
-			s.requestDispatcher[typ.String()](req)
 		}
 		batch := s.getNextBatchToRun()
 		if batch != nil {
@@ -97,12 +99,12 @@ func (s *Scheduler) processBatchResult(batch *ScheduleBatch, result *ScheduleBat
 
 		// non chunked, just act like decode first token
 		for i, req := range batch.reqs {
-			req.OutputIds = append(req.OutputIds, result.nextTokenIds.Index(i).ToInt())
+			req.outputIds = append(req.outputIds, result.nextTokenIds.Index(i).ToInt())
 		}
 	}
 	if batch.forwardMode == "DECODE" {
 		for i, req := range batch.reqs {
-			req.OutputIds = append(req.OutputIds, result.nextTokenIds.Index(i).ToInt())
+			req.outputIds = append(req.outputIds, result.nextTokenIds.Index(i).ToInt())
 		}
 	}
 
@@ -143,9 +145,29 @@ type ScheduleBatchResult struct {
 }
 
 type PrefillAdder struct {
+	RemTotalTokens int
+}
+
+func NewPerfillAdder(batch *ScheduleBatch) *PrefillAdder {
+	remTokens := 0
+	for _, req := range batch.reqs {
+		remTokens += len(req.originInputIds)
+	}
+	return &PrefillAdder{
+		RemTotalTokens: remTokens,
+	}
+}
+
+func kvCacheAvailableTokenSize() int {
+	panic("not implemented")
 }
 
 func (p PrefillAdder) add(req *ScheduleReq) bool {
+	totalTokens := len(req.originInputIds) + req.samplingParams.MaxNewTokens
+	if p.RemTotalTokens < totalTokens {
+		return false
+	}
+	p.RemTotalTokens -= totalTokens
 	return true
 }
 

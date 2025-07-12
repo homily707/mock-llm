@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -10,7 +11,28 @@ import (
 )
 
 type TokenizerManager struct {
-	reqStates map[string]*ReqState
+	reqStates   map[string]*ReqState
+	input       chan any
+	toSend      chan any
+	detokenized chan *StrOut
+}
+
+func (tm *TokenizerManager) eventLoop(ctx context.Context) {
+	for {
+		select {
+		case input := <-tm.input:
+			var obj any
+			switch input.(type) {
+			case *types.GenerateReqInput:
+				obj = tm.tokenizeGenerateReqInput(input.(*types.GenerateReqInput))
+			}
+			tm.toSend <- obj
+		case out := <-tm.detokenized:
+			tm.reqStates[out.rid].Output <- out
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (tm *TokenizerManager) tokenizeGenerateReqInput(input *types.GenerateReqInput) TokenizedGenerateReqInput {
@@ -25,7 +47,18 @@ func (tm *TokenizerManager) tokenizeGenerateReqInput(input *types.GenerateReqInp
 		FirstTokenTime: time.Now(),
 		LastTokenTime:  time.Now(),
 	}
-	return TokenizedGenerateReqInput{}
+	promptTokens := len(input.Text)
+	ids := make([]int, promptTokens)
+	for i := 0; i < promptTokens; i++ {
+		ids[i] = rand.Int()
+	}
+	return TokenizedGenerateReqInput{
+		rid:            rid,
+		inputText:      input.Text,
+		inputIds:       ids,
+		samplingParams: input.SamplingParams,
+		stream:         input.Stream,
+	}
 }
 
 type DetokenizerManager struct {
@@ -81,10 +114,11 @@ type StrOut struct {
 }
 
 type TokenizedGenerateReqInput struct {
-	InputText      string
-	InputIds       []int
-	SamplingParams types.SamplingParams
-	Stream         bool
+	rid            string
+	inputText      string
+	inputIds       []int
+	samplingParams types.SamplingParams
+	stream         bool
 }
 
 type ReqState struct {
